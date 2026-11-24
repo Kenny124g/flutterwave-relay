@@ -18,31 +18,39 @@ PMS_WEBHOOK_SECRET = os.environ.get("PMS_WEBHOOK_SECRET")
 
 
 def verify_and_forward(transaction_id):
-    """Verify a transaction with Flutterwave directly, and forward the
-    genuine result to PythonAnywhere. The browser can trigger this, but
-    only the relay (holding the secret) can actually report the outcome —
-    the browser never gets to claim success on its own."""
     headers = {"Authorization": f"Bearer {FLW_SECRET_KEY}"}
     response = requests.get(f"{FLW_BASE_URL}/transactions/{transaction_id}/verify", headers=headers)
     verification = response.json()
     v_data = verification.get("data", {})
-
     status = v_data.get("status")
 
+    print(f"[VERIFY] transaction_id={transaction_id} flutterwave_status={status} full_response={verification}", flush=True)
+
     if verification.get("status") == "success" and status == "successful":
-        requests.post(
-            PMS_WEBHOOK_URL,
-            json={"tx_ref": v_data.get("tx_ref"), "amount": v_data.get("amount"), "event": "successful"},
-            headers={"X-Relay-Secret": PMS_WEBHOOK_SECRET},
-            timeout=10,
-        )
+        try:
+            fwd_response = requests.post(
+                PMS_WEBHOOK_URL,
+                json={"tx_ref": v_data.get("tx_ref"), "amount": v_data.get("amount"), "event": "successful"},
+                headers={"X-Relay-Secret": PMS_WEBHOOK_SECRET},
+                timeout=15,
+            )
+            print(f"[FORWARD] sent to PMS, status_code={fwd_response.status_code}, body={fwd_response.text}", flush=True)
+        except Exception as e:
+            print(f"[FORWARD ERROR] {type(e).__name__}: {e}", flush=True)
+
     elif status in ("cancelled", "failed"):
-        requests.post(
-            PMS_WEBHOOK_URL,
-            json={"tx_ref": v_data.get("tx_ref"), "event": status},
-            headers={"X-Relay-Secret": PMS_WEBHOOK_SECRET},
-            timeout=10,
-        )
+        try:
+            fwd_response = requests.post(
+                PMS_WEBHOOK_URL,
+                json={"tx_ref": v_data.get("tx_ref"), "event": status},
+                headers={"X-Relay-Secret": PMS_WEBHOOK_SECRET},
+                timeout=15,
+            )
+            print(f"[FORWARD] sent to PMS, status_code={fwd_response.status_code}, body={fwd_response.text}", flush=True)
+        except Exception as e:
+            print(f"[FORWARD ERROR] {type(e).__name__}: {e}", flush=True)
+    else:
+        print(f"[VERIFY] status={status!r} — not successful/cancelled/failed, no action taken", flush=True)
 
     return v_data
 
