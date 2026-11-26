@@ -30,7 +30,13 @@ def verify_and_forward(transaction_id):
         try:
             fwd_response = requests.post(
                 PMS_WEBHOOK_URL,
-                json={"tx_ref": v_data.get("tx_ref"), "amount": v_data.get("amount"), "event": "successful"},
+                json={
+                    "tx_ref": v_data.get("tx_ref"),
+                    "transaction_id": v_data.get("id"),
+                    "amount": v_data.get("amount"),
+                    "currency": v_data.get("currency"),
+                    "event": "successful",
+                },
                 headers={"X-Relay-Secret": PMS_WEBHOOK_SECRET},
                 timeout=15,
             )
@@ -42,7 +48,13 @@ def verify_and_forward(transaction_id):
         try:
             fwd_response = requests.post(
                 PMS_WEBHOOK_URL,
-                json={"tx_ref": v_data.get("tx_ref"), "event": status},
+                json={
+                    "tx_ref": v_data.get("tx_ref"),
+                    "transaction_id": v_data.get("id"),
+                    "amount": v_data.get("amount"),
+                    "currency": v_data.get("currency"),
+                    "event": "successful",
+                },
                 headers={"X-Relay-Secret": PMS_WEBHOOK_SECRET},
                 timeout=15,
             )
