@@ -104,22 +104,91 @@ def verify_now():
     return jsonify({"success": True, "status": v_data.get("status"), "tx_ref": v_data.get("tx_ref")})
 
 
-@app.route("/webhooks/flutterwave", methods=["POST"])
+@public_bp.route("/webhooks/flutterwave", methods=["POST"])
 def flutterwave_webhook():
-    """Flutterwave calls THIS relay (not PythonAnywhere directly), since
-    that's where we registered the webhook URL in their dashboard."""
-    incoming_hash = request.headers.get("verif-hash", "")
-    if not incoming_hash or incoming_hash != FLW_SECRET_HASH:
+    """Accept payment events from our trusted relay."""
+
+    incoming_secret = request.headers.get("X-Relay-Secret", "")
+    expected_secret = os.environ.get("PMS_WEBHOOK_SECRET", "")
+
+    if not incoming_secret or not expected_secret or incoming_secret != expected_secret:
         return jsonify({"error": "Invalid signature"}), 401
 
-    event = request.get_json()
-    data = event.get("data", {})
+    data = request.get_json(silent=True) or {}
 
-    if data.get("status") in ("successful", "cancelled", "failed"):
-        verify_and_forward(str(data.get("id")))
+    tx_ref = data.get("tx_ref")
+    event = data.get("event")
+
+    if not tx_ref or not event:
+        return jsonify({
+            "error": "Missing transaction reference or event"
+        }), 400
+
+    booking = Booking.query.filter_by(
+        pending_tx_ref=tx_ref
+    ).first()
+
+    if booking is None:
+        return jsonify({"status": "booking_not_found"}), 200
+
+    # Repeated successful webhook for an already-paid booking.
+    if event == "successful" and booking.status == "paid":
+        return jsonify({"status": "already_processed"}), 200
+
+    if event == "successful":
+
+        transaction_id = data.get("transaction_id")
+        amount = data.get("amount")
+        currency = data.get("currency")
+
+        # Transaction ID is required for online payment tracking.
+        if not transaction_id:
+            return jsonify({
+                "error": "Missing Flutterwave transaction ID"
+            }), 400
+
+        # This hotel PMS currently processes payments in NGN.
+        if currency and currency != "NGN":
+            return jsonify({
+                "error": "Unsupported payment currency"
+            }), 400
+
+        system_user = User.query.filter_by(
+            username="system-flutterwave"
+        ).first()
+
+        if system_user is None:
+            return jsonify({
+                "error": "Flutterwave system user not configured"
+            }), 500
+
+        try:
+            mark_paid(
+                booking_id=booking.id,
+                confirmed_by_id=system_user.id,
+                amount=amount,
+                payment_method="transfer",
+                flutterwave_transaction_id=str(transaction_id),
+                transaction_reference=tx_ref,
+            )
+
+        except PaymentError as e:
+            return jsonify({
+                "error": "Payment confirmation failed",
+                "details": str(e),
+            }), 500
+
+    elif event in ("cancelled", "failed"):
+
+        if booking.status == "booked":
+            cancel_booking(booking.id)
+
+    else:
+        return jsonify({
+            "error": "Unknown payment event"
+        }), 400
 
     return jsonify({"status": "received"}), 200
-
 
 @app.route("/", methods=["GET"])
 def health_check():
