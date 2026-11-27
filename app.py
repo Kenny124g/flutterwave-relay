@@ -16,6 +16,9 @@ FLW_BASE_URL = "https://api.flutterwave.com/v3"
 PMS_WEBHOOK_URL = os.environ.get("PMS_WEBHOOK_URL")
 PMS_WEBHOOK_SECRET = os.environ.get("PMS_WEBHOOK_SECRET")
 
+@app.route("/", methods=["GET"])
+def health_check():
+    return jsonify({"status": "relay is running"})
 
 def verify_and_forward(transaction_id):
     headers = {"Authorization": f"Bearer {FLW_SECRET_KEY}"}
